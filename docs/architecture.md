@@ -1,5 +1,7 @@
 # Architecture & Tech Stack
 
+See also: [features](features.md), [specs](specs/README.md), [decisions](decisions/README.md) and [CLAUDE.md](../CLAUDE.md) for the development workflow.
+
 A property listings platform for the South African market (sale and rental), delivered on web and mobile.
 
 ## Decisions

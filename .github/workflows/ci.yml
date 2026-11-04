@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Detects which parts of the monorepo exist yet, so jobs switch on as the code is scaffolded.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.check.outputs.backend }}
+      frontend: ${{ steps.check.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if ls backend/*.sln >/dev/null 2>&1 || ls backend/*.slnx >/dev/null 2>&1; then echo "backend=true" >> "$GITHUB_OUTPUT"; else echo "backend=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -f pnpm-workspace.yaml ]; then echo "frontend=true" >> "$GITHUB_OUTPUT"; else echo "frontend=false" >> "$GITHUB_OUTPUT"; fi
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links in docs
+        run: |
+          status=0
+          while IFS= read -r file; do
+            dir=$(dirname "$file")
+            grep -oE '\]\([^)#]+' "$file" | sed 's/^](//' | grep -vE '^(https?:|mailto:)' | while IFS= read -r link; do
+              if [ ! -e "$dir/$link" ]; then echo "::error file=$file::Broken link: $link"; echo 1 > "$RUNNER_TEMP/broken"; fi
+            done
+          done < <(git ls-files '*.md')
+          if [ -f "$RUNNER_TEMP/broken" ]; then exit 1; fi
+
+  backend:
+    needs: detect
+    if: needs.detect.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: backend/global.json
+      - run: dotnet restore
+        working-directory: backend
+      - run: dotnet build --no-restore -warnaserror
+        working-directory: backend
+      - run: dotnet test --no-build
+        working-directory: backend
+
+  frontend:
+    needs: detect
+    if: needs.detect.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run lint typecheck test build
